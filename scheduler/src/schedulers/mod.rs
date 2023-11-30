@@ -14,4 +14,7 @@
 mod empty;
 pub use empty::Empty;
 
+mod round_robin;
+pub use round_robin::RoundRobin;
+
 // TODO import your schedulers here
