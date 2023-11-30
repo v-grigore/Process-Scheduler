@@ -120,9 +120,9 @@ impl Scheduler for RoundRobin {
                             current_process.timings.2 += self.timeslice.get() - remaining - 1;
                             current_process.timings.1 += 1;
                             current_process.timings.0 += self.timeslice.get() - remaining;
-                            self.remaining = remaining;
                             if remaining >= self.minimum_remaining_timeslice {
                                 self.ready_queue.push_front(current_process.clone());
+                                self.remaining = remaining;
                             }
                             else {
                                 self.ready_queue.push_back(current_process.clone());
