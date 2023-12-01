@@ -243,13 +243,15 @@ impl Scheduler for RoundRobin {
 
                         self.waiting_queue.push(process.clone());
 
+                        self.remaining = self.timeslice.get();
+
                         return Success;
                     }
                     Syscall::Wait(_) => {}
                     Syscall::Signal(_) => {}
                     Syscall::Exit => {
                         let mut process = self.current_process.unwrap();
-                        if process.pid == 1 && !self.ready_queue.is_empty() || !self.waiting_queue.is_empty() {
+                        if process.pid == 1 && (!self.ready_queue.is_empty() || !self.waiting_queue.is_empty()) {
                             self.panic = true;
                         }
                         self.current_process = None;
@@ -280,6 +282,8 @@ impl Scheduler for RoundRobin {
                                 true
                             }
                         });
+
+                        self.remaining = self.timeslice.get();
 
                         return Success;
                     }
