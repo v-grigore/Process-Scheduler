@@ -75,6 +75,49 @@ impl RoundRobin {
             sleep: 0,
         }
     }
+
+    pub fn wake(&mut self) {
+        self.waiting_queue.retain(|process| {
+            if let Waiting {event: Some(_)} = process.state {
+                true
+            }
+            else if process.sleep <= 0 {
+                let mut ready_process = process.clone();
+                ready_process.state = Ready;
+                self.ready_queue.push_back(ready_process.clone());
+                false
+            }
+            else {
+                true
+            }
+        });
+    }
+
+    fn update_ready_timings(&mut self, remaining: usize) {
+        for waiting_process in &mut self.ready_queue {
+            waiting_process.timings.0 += self.remaining - remaining;
+        }
+    }
+
+    fn update_waiting_timings(&mut self, remaining: usize) {
+        for waiting_process in &mut self.waiting_queue {
+            waiting_process.timings.0 += self.remaining - remaining;
+            if let Waiting { event: Some(_) } = waiting_process.state {
+                continue;
+            }
+            waiting_process.sleep -= (self.remaining - remaining) as i32;
+        }
+    }
+
+    fn reschedule_process(&mut self, remaining: usize, process: PCB) {
+        if remaining >= self.minimum_remaining_timeslice {
+            self.ready_queue.push_front(process.clone());
+            self.remaining = remaining;
+        } else {
+            self.ready_queue.push_back(process.clone());
+            self.remaining = self.timeslice.get();
+        }
+    }
 }
 
 impl Scheduler for RoundRobin {
@@ -90,32 +133,19 @@ impl Scheduler for RoundRobin {
             self.sleep = 0;
             for process in self.waiting_queue.iter_mut() {
                 process.timings.0 += amount as usize;
-                if let Waiting {event: Some(event)} = process.state {
+                if let Waiting {event: Some(_)} = process.state {
                     continue;
                 }
                 process.sleep -= amount;
             }
         }
 
-        self.waiting_queue.retain(|process| {
-            if let Waiting {event: Some(event)} = process.state {
-                true
-            }
-            else if process.sleep <= 0 {
-                let mut ready_process = process.clone();
-                ready_process.state = Ready;
-                self.ready_queue.push_back(ready_process.clone());
-                false
-            }
-            else {
-                true
-            }
-        });
+        self.wake();
 
         if self.current_process == None && self.ready_queue.is_empty() && !self.waiting_queue.is_empty() {
             let mut amount = 0;
             for process in &self.waiting_queue {
-                if let Waiting {event: Some(event)} = process.state {
+                if let Waiting {event: Some(_)} = process.state {
                     continue;
                 }
                 amount = process.sleep;
@@ -147,44 +177,23 @@ impl Scheduler for RoundRobin {
         Done
     }
 
-    fn stop(&mut self, reason: crate::StopReason) -> crate::SyscallResult {
-        match reason {
-            StopReason::Syscall {syscall, remaining} => {
+    fn stop(&mut self, reason: StopReason) -> SyscallResult {
+        return match reason {
+            StopReason::Syscall { syscall, remaining } => {
                 if self.current_process == None && self.next_pid != 1 {
                     return NoRunningProcess;
                 }
 
                 match syscall {
                     Syscall::Fork(priority) => {
-                        let process = PCB::new(self.next_pid, ProcessState::Ready, (0, 0, 0), priority);
+                        let process = PCB::new(self.next_pid, Ready, (0, 0, 0), priority);
                         self.next_pid += 1;
 
-                        for waiting_process in &mut self.ready_queue {
-                            waiting_process.timings.0 += self.remaining - remaining;
-                        }
+                        self.update_ready_timings(remaining);
 
-                        for waiting_process in &mut self.waiting_queue {
-                            waiting_process.timings.0 += self.remaining - remaining;
-                            if let Waiting {event: Some(event)} = waiting_process.state {
-                                continue;
-                            }
-                            waiting_process.sleep -= (self.remaining - remaining) as i32;
-                        }
+                        self.update_waiting_timings(remaining);
 
-                        self.waiting_queue.retain(|process| {
-                            if let Waiting {event: Some(event)} = process.state {
-                                true
-                            }
-                            else if process.sleep <= 0 {
-                                let mut ready_process = process.clone();
-                                ready_process.state = Ready;
-                                self.ready_queue.push_back(ready_process.clone());
-                                false
-                            }
-                            else {
-                                true
-                            }
-                        });
+                        self.wake();
 
                         self.ready_queue.push_back(process.clone());
                         if let Some(mut current_process) = self.current_process {
@@ -193,50 +202,22 @@ impl Scheduler for RoundRobin {
                             current_process.timings.2 += self.remaining - remaining - 1;
                             current_process.timings.1 += 1;
                             current_process.timings.0 += self.remaining - remaining;
-                            if remaining >= self.minimum_remaining_timeslice {
-                                self.ready_queue.push_front(current_process.clone());
-                                self.remaining = remaining;
-                            }
-                            else {
-                                self.ready_queue.push_back(current_process.clone());
-                                self.remaining = self.timeslice.get();
-                            }
+                            self.reschedule_process(remaining, current_process);
                         }
-                        return SyscallResult::Pid(process.pid().clone());
+                        SyscallResult::Pid(process.pid().clone())
                     }
                     Syscall::Sleep(amount) => {
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
-                        for waiting_process in &mut self.ready_queue {
-                            waiting_process.timings.0 += self.remaining - remaining;
-                        }
+                        self.update_ready_timings(remaining);
 
-                        for waiting_process in &mut self.waiting_queue {
-                            waiting_process.timings.0 += self.remaining - remaining;
-                            if let Waiting {event: Some(event)} = waiting_process.state {
-                                continue;
-                            }
-                            waiting_process.sleep -= (self.remaining - remaining) as i32;
-                        }
+                        self.update_waiting_timings(remaining);
 
-                        self.waiting_queue.retain(|process| {
-                            if let Waiting {event: Some(event)} = process.state {
-                                true
-                            }
-                            else if process.sleep <= 0 {
-                                let mut ready_process = process.clone();
-                                ready_process.state = Ready;
-                                self.ready_queue.push_back(ready_process.clone());
-                                false
-                            }
-                            else {
-                                true
-                            }
-                        });
+                        self.wake();
 
                         let event = None;
-                        process.state = Waiting {event};
+                        process.state = Waiting { event };
                         process.sleep = amount as i32;
                         process.timings.2 += self.remaining - remaining - 1;
                         process.timings.1 += 1;
@@ -246,40 +227,19 @@ impl Scheduler for RoundRobin {
 
                         self.remaining = self.timeslice.get();
 
-                        return Success;
+                        Success
                     }
                     Syscall::Wait(event) => {
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
-                        for waiting_process in &mut self.ready_queue {
-                            waiting_process.timings.0 += self.remaining - remaining;
-                        }
+                        self.update_ready_timings(remaining);
 
-                        for waiting_process in &mut self.waiting_queue {
-                            waiting_process.timings.0 += self.remaining - remaining;
-                            if let Waiting {event: Some(event)} = waiting_process.state {
-                                continue;
-                            }
-                            waiting_process.sleep -= (self.remaining - remaining) as i32;
-                        }
+                        self.update_waiting_timings(remaining);
 
-                        self.waiting_queue.retain(|process| {
-                            if let Waiting {event: Some(event)} = process.state {
-                                true
-                            }
-                            else if process.sleep <= 0 {
-                                let mut ready_process = process.clone();
-                                ready_process.state = Ready;
-                                self.ready_queue.push_back(ready_process.clone());
-                                false
-                            }
-                            else {
-                                true
-                            }
-                        });
+                        self.wake();
 
-                        process.state = Waiting {event: Some(event)};
+                        process.state = Waiting { event: Some(event) };
                         process.timings.2 += self.remaining - remaining - 1;
                         process.timings.1 += 1;
                         process.timings.0 += self.remaining - remaining;
@@ -288,109 +248,58 @@ impl Scheduler for RoundRobin {
 
                         self.remaining = self.timeslice.get();
 
-                        return Success;
+                        Success
                     }
                     Syscall::Signal(signal) => {
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
-                        for waiting_process in &mut self.ready_queue {
-                            waiting_process.timings.0 += self.remaining - remaining;
-                        }
+                        self.update_ready_timings(remaining);
 
-                        for waiting_process in &mut self.waiting_queue {
-                            waiting_process.timings.0 += self.remaining - remaining;
-                            if let Waiting {event: Some(event)} = waiting_process.state {
-                                continue;
-                            }
-                            waiting_process.sleep -= (self.remaining - remaining) as i32;
-                        }
+                        self.update_waiting_timings(remaining);
 
                         self.waiting_queue.retain(|process| {
-                            if let Waiting {event: Some(event)} = process.state {
+                            if let Waiting { event: Some(event) } = process.state {
                                 if event == signal {
                                     let mut ready_process = process.clone();
                                     ready_process.state = Ready;
                                     self.ready_queue.push_back(ready_process.clone());
                                     false
-                                }
-                                else {
+                                } else {
                                     true
                                 }
-                            }
-                            else {
+                            } else {
                                 true
                             }
                         });
 
-                        self.waiting_queue.retain(|process| {
-                            if let Waiting {event: Some(event)} = process.state {
-                                true
-                            }
-                            else if process.sleep <= 0 {
-                                let mut ready_process = process.clone();
-                                ready_process.state = Ready;
-                                self.ready_queue.push_back(ready_process.clone());
-                                false
-                            }
-                            else {
-                                true
-                            }
-                        });
+                        self.wake();
 
                         process.state = Ready;
                         process.timings.2 += self.remaining - remaining - 1;
                         process.timings.1 += 1;
                         process.timings.0 += self.remaining - remaining;
 
-                        if remaining >= self.minimum_remaining_timeslice {
-                            self.ready_queue.push_front(process.clone());
-                            self.remaining = remaining;
-                        }
-                        else {
-                            self.ready_queue.push_back(process.clone());
-                            self.remaining = self.timeslice.get();
-                        }
+                        self.reschedule_process(remaining, process);
 
-                        return Success;
+                        Success
                     }
                     Syscall::Exit => {
-                        let mut process = self.current_process.unwrap();
+                        let process = self.current_process.unwrap();
                         if process.pid == 1 && (!self.ready_queue.is_empty() || !self.waiting_queue.is_empty()) {
                             self.panic = true;
                         }
                         self.current_process = None;
 
-                        for waiting_process in &mut self.ready_queue {
-                            waiting_process.timings.0 += self.remaining - remaining;
-                        }
+                        self.update_ready_timings(remaining);
 
-                        for waiting_process in &mut self.waiting_queue {
-                            waiting_process.timings.0 += self.remaining - remaining;
-                            if let Waiting {event: Some(event)} = waiting_process.state {
-                                continue;
-                            }
-                            waiting_process.sleep -= (self.remaining - remaining) as i32;
-                        }
+                        self.update_waiting_timings(remaining);
 
-                        self.waiting_queue.retain(|process| {
-                            if let Waiting {event: Some(event)} = process.state {
-                                true
-                            }
-                            else if process.sleep <= 0 {
-                                let mut ready_process = process.clone();
-                                ready_process.state = Ready;
-                                self.ready_queue.push_back(ready_process.clone());
-                                false
-                            }
-                            else {
-                                true
-                            }
-                        });
+                        self.wake();
 
                         self.remaining = self.timeslice.get();
 
-                        return Success;
+                        Success
                     }
                 }
             }
@@ -406,39 +315,24 @@ impl Scheduler for RoundRobin {
 
                 for waiting_process in &mut self.waiting_queue {
                     waiting_process.timings.0 += self.remaining;
-                    if let Waiting {event: Some(event)} = waiting_process.state {
+                    if let Waiting { event: Some(_) } = waiting_process.state {
                         continue;
                     }
                     waiting_process.sleep -= self.remaining as i32;
                 }
 
-                self.waiting_queue.retain(|process| {
-                    if let Waiting {event: Some(event)} = process.state {
-                        true
-                    }
-                    else if process.sleep <= 0 {
-                        let mut ready_process = process.clone();
-                        ready_process.state = Ready;
-                        self.ready_queue.push_back(ready_process.clone());
-                        false
-                    }
-                    else {
-                        true
-                    }
-                });
+                self.wake();
 
                 self.remaining = self.timeslice.get();
                 self.ready_queue.push_back(process.clone());
                 self.current_process = None;
-                return Success;
+                Success
             }
         }
-
-        Success
     }
 
-    fn list(&mut self) -> Vec<&dyn crate::Process> {
-        let mut vec: Vec<&dyn crate::Process> = Vec::new();
+    fn list(&mut self) -> Vec<&dyn Process> {
+        let mut vec: Vec<&dyn Process> = Vec::new();
         if let Some(ref process) = self.current_process {
             vec.push(process);
         }
