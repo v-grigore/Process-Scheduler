@@ -338,6 +338,7 @@ impl Scheduler for RoundRobin {
                             }
                         });
 
+                        process.state = Ready;
                         process.timings.2 += self.remaining - remaining - 1;
                         process.timings.1 += 1;
                         process.timings.0 += self.remaining - remaining;
