@@ -89,11 +89,11 @@ impl Scheduler for RoundRobin {
             let amount = self.sleep;
             self.sleep = 0;
             for process in self.waiting_queue.iter_mut() {
+                process.timings.0 += amount as usize;
                 if let Waiting {event: Some(event)} = process.state {
                     continue;
                 }
                 process.sleep -= amount;
-                process.timings.0 += amount as usize;
             }
         }
 
@@ -199,6 +199,7 @@ impl Scheduler for RoundRobin {
                             }
                             else {
                                 self.ready_queue.push_back(current_process.clone());
+                                self.remaining = self.timeslice.get();
                             }
                         }
                         return SyscallResult::Pid(process.pid().clone());
@@ -247,8 +248,111 @@ impl Scheduler for RoundRobin {
 
                         return Success;
                     }
-                    Syscall::Wait(_) => {}
-                    Syscall::Signal(_) => {}
+                    Syscall::Wait(event) => {
+                        let mut process = self.current_process.unwrap();
+                        self.current_process = None;
+
+                        for waiting_process in &mut self.ready_queue {
+                            waiting_process.timings.0 += self.remaining - remaining;
+                        }
+
+                        for waiting_process in &mut self.waiting_queue {
+                            waiting_process.timings.0 += self.remaining - remaining;
+                            if let Waiting {event: Some(event)} = waiting_process.state {
+                                continue;
+                            }
+                            waiting_process.sleep -= (self.remaining - remaining) as i32;
+                        }
+
+                        self.waiting_queue.retain(|process| {
+                            if let Waiting {event: Some(event)} = process.state {
+                                true
+                            }
+                            else if process.sleep <= 0 {
+                                let mut ready_process = process.clone();
+                                ready_process.state = Ready;
+                                self.ready_queue.push_back(ready_process.clone());
+                                false
+                            }
+                            else {
+                                true
+                            }
+                        });
+
+                        process.state = Waiting {event: Some(event)};
+                        process.timings.2 += self.remaining - remaining - 1;
+                        process.timings.1 += 1;
+                        process.timings.0 += self.remaining - remaining;
+
+                        self.waiting_queue.push(process.clone());
+
+                        self.remaining = self.timeslice.get();
+
+                        return Success;
+                    }
+                    Syscall::Signal(signal) => {
+                        let mut process = self.current_process.unwrap();
+                        self.current_process = None;
+
+                        for waiting_process in &mut self.ready_queue {
+                            waiting_process.timings.0 += self.remaining - remaining;
+                        }
+
+                        for waiting_process in &mut self.waiting_queue {
+                            waiting_process.timings.0 += self.remaining - remaining;
+                            if let Waiting {event: Some(event)} = waiting_process.state {
+                                continue;
+                            }
+                            waiting_process.sleep -= (self.remaining - remaining) as i32;
+                        }
+
+                        self.waiting_queue.retain(|process| {
+                            if let Waiting {event: Some(event)} = process.state {
+                                if event == signal {
+                                    let mut ready_process = process.clone();
+                                    ready_process.state = Ready;
+                                    self.ready_queue.push_back(ready_process.clone());
+                                    false
+                                }
+                                else {
+                                    true
+                                }
+                            }
+                            else {
+                                true
+                            }
+                        });
+
+                        self.waiting_queue.retain(|process| {
+                            if let Waiting {event: Some(event)} = process.state {
+                                true
+                            }
+                            else if process.sleep <= 0 {
+                                let mut ready_process = process.clone();
+                                ready_process.state = Ready;
+                                self.ready_queue.push_back(ready_process.clone());
+                                false
+                            }
+                            else {
+                                true
+                            }
+                        });
+
+                        process.timings.2 += self.remaining - remaining - 1;
+                        process.timings.1 += 1;
+                        process.timings.0 += self.remaining - remaining;
+
+                        if remaining >= self.minimum_remaining_timeslice {
+                            self.ready_queue.push_front(process.clone());
+                            self.remaining = remaining;
+                        }
+                        else {
+                            self.ready_queue.push_back(process.clone());
+                            self.remaining = self.timeslice.get();
+                        }
+
+                        return Success;
+                    }
                     Syscall::Exit => {
                         let mut process = self.current_process.unwrap();
                         if process.pid == 1 && (!self.ready_queue.is_empty() || !self.waiting_queue.is_empty()) {
