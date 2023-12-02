@@ -138,6 +138,18 @@ impl CFS {
             self.remaining = self.timeslice.get();
         }
     }
+
+    fn update_minimum_vruntime(&mut self, current: usize) {
+        let mut all_vruntime: Vec<usize> = self.ready_queue.iter().map(|process| process.vruntime)
+            .chain(self.waiting_queue.iter().map(|process| process.vruntime))
+            .collect();
+
+        all_vruntime.push(current);
+        
+        if let Some(min) = all_vruntime.iter().cloned().min() {
+            self.minimum_vruntime = min;
+        }
+    }
 }
 
 impl Scheduler for CFS {
@@ -217,11 +229,11 @@ impl Scheduler for CFS {
 
                         self.wake();
 
-                        self.ready_queue.push_back(process.clone());
+                        if process.pid == 1 {
+                            self.ready_queue.push_back(process.clone());
+                        }
 
                         if let Some(mut current_process) = self.current_process {
-                            self.timeslice = NonZeroUsize::new(self.cpu_time.get() / (self.ready_queue.len() + 1)).unwrap();
-
                             self.current_process = None;
                             current_process.state = Ready;
                             current_process.timings.2 += self.remaining - remaining - 1;
@@ -229,9 +241,13 @@ impl Scheduler for CFS {
                             current_process.timings.0 += self.remaining - remaining;
                             current_process.vruntime += self.remaining - remaining;
 
+                            self.update_minimum_vruntime(current_process.vruntime);
                             process.vruntime = self.minimum_vruntime;
+                            self.ready_queue.push_back(process.clone());
 
-                            self.reschedule_process(remaining, current_process);
+                            self.timeslice = NonZeroUsize::new(self.cpu_time.get() / (self.ready_queue.len() + 1)).unwrap();
+
+                            self.reschedule_process(self.timeslice.get(), current_process);
                         }
                         SyscallResult::Pid(process.pid().clone())
                     }
