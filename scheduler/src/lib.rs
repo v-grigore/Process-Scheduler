@@ -13,7 +13,7 @@ use schedulers::Empty;
 pub use crate::scheduler::{
     Pid, Process, ProcessState, Scheduler, SchedulingDecision, StopReason, Syscall, SyscallResult,
 };
-use crate::schedulers::RoundRobin;
+use crate::schedulers::{CFS, PriorityQueue, RoundRobin};
 
 mod schedulers;
 
@@ -47,7 +47,7 @@ pub fn priority_queue(
     timeslice: NonZeroUsize,
     minimum_remaining_timeslice: usize,
 ) -> impl Scheduler {
-    Empty
+    PriorityQueue::new(timeslice, minimum_remaining_timeslice)
 }
 
 /// Returns a structure that implements the `Scheduler` trait with a simplified [cfs](https://opensource.com/article/19/2/fair-scheduling-linux) scheduler policy
@@ -61,5 +61,5 @@ pub fn priority_queue(
 ///                                 the `minimum_remaining_timeslice` value.
 #[allow(unused_variables)]
 pub fn cfs(cpu_time: NonZeroUsize, minimum_remaining_timeslice: usize) -> impl Scheduler {
-    Empty
+    CFS::new(cpu_time, minimum_remaining_timeslice)
 }
