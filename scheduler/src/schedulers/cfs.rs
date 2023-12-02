@@ -198,12 +198,15 @@ impl Scheduler for CFS {
             process.state = Running;
             self.current_process = Some(process.clone());
             let pid = process.pid();
+            self.remaining = self.remaining.min(self.timeslice.get());
             let timeslice = NonZeroUsize::new(self.remaining).unwrap();
+            
             return Run {pid, timeslice};
         }
 
         if let Some(process) = self.current_process {
             let pid = process.pid();
+            self.remaining = self.remaining.min(self.timeslice.get());
             let timeslice = NonZeroUsize::new(self.remaining).unwrap();
             return Run {pid, timeslice};
         }
@@ -261,7 +264,9 @@ impl Scheduler for CFS {
 
                         self.wake();
 
-                        self.timeslice = NonZeroUsize::new(self.cpu_time.get() / self.ready_queue.len()).unwrap();
+                        if self.ready_queue.len() != 0 {
+                            self.timeslice = NonZeroUsize::new(self.cpu_time.get() / self.ready_queue.len()).unwrap();
+                        }
 
                         let event = None;
                         process.state = Waiting { event };
@@ -289,7 +294,9 @@ impl Scheduler for CFS {
 
                         self.wake();
 
-                        self.timeslice = NonZeroUsize::new(self.cpu_time.get() / self.ready_queue.len()).unwrap();
+                        if self.ready_queue.len() != 0 {
+                            self.timeslice = NonZeroUsize::new(self.cpu_time.get() / self.ready_queue.len()).unwrap();
+                        }
 
                         process.state = Waiting { event: Some(event) };
                         process.timings.2 += self.remaining - remaining - 1;
@@ -355,7 +362,7 @@ impl Scheduler for CFS {
 
                         self.wake();
 
-                        if process.pid != 1 {
+                        if self.ready_queue.len() != 0 {
                             self.timeslice = NonZeroUsize::new(self.cpu_time.get() / self.ready_queue.len()).unwrap();
                         }
 
