@@ -247,7 +247,7 @@ impl Scheduler for CFS {
 
                             self.timeslice = NonZeroUsize::new(self.cpu_time.get() / (self.ready_queue.len() + 1)).unwrap();
 
-                            self.reschedule_process(self.timeslice.get(), current_process);
+                            self.reschedule_process(self.timeslice.get().min(remaining), current_process);
                         }
                         SyscallResult::Pid(process.pid().clone())
                     }
