@@ -17,4 +17,10 @@ pub use empty::Empty;
 mod round_robin;
 pub use round_robin::RoundRobin;
 
+mod priority_queue;
+pub use priority_queue::PriorityQueue;
+
+mod cfs;
+pub use cfs::CFS;
+
 // TODO import your schedulers here
