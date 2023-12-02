@@ -9,11 +9,6 @@
 //! pub use scheduler_name::SchedulerName;
 //! ```
 //!
-
-// TODO delete this example
-mod empty;
-pub use empty::Empty;
-
 mod round_robin;
 pub use round_robin::RoundRobin;
 
@@ -22,5 +17,3 @@ pub use priority_queue::PriorityQueue;
 
 mod cfs;
 pub use cfs::CFS;
-
-// TODO import your schedulers here

@@ -120,11 +120,13 @@ impl PriorityQueue {
 
     fn reschedule_process(&mut self, remaining: usize, process: PCB) {
         if remaining >= self.minimum_remaining_timeslice {
+            // partial_cmp always returns some value
             self.ready_queue.make_contiguous().sort_by(|a, b| b.partial_cmp(a).unwrap());
             self.ready_queue.push_front(process.clone());
             self.remaining = remaining;
         } else {
             self.ready_queue.push_back(process.clone());
+            // partial_cmp always returns some value
             self.ready_queue.make_contiguous().sort_by(|a, b| b.partial_cmp(a).unwrap());
             self.remaining = self.timeslice.get();
         }
@@ -140,6 +142,7 @@ impl Scheduler for PriorityQueue {
         self.waiting_queue.sort_by_key(|process| process.sleep);
 
         if self.sleep != 0 {
+            // partial_cmp always returns some value
             self.ready_queue.make_contiguous().sort_by(|a, b| b.partial_cmp(a).unwrap());
 
             let amount = self.sleep;
@@ -169,20 +172,24 @@ impl Scheduler for PriorityQueue {
             }
             self.sleep = amount;
 
+            // amount can't be 0, case handled above
             return Sleep(NonZeroUsize::new(amount as usize).unwrap());
         }
 
         if !self.ready_queue.is_empty() {
+            // ready_queue has at least 1 process
             let mut process = self.ready_queue.pop_front().unwrap();
             process.state = Running;
             self.current_process = Some(process.clone());
             let pid = process.pid();
+            // self.remaining can't be 0 (a process cannot have 0 remaining timeslice)
             let timeslice = NonZeroUsize::new(self.remaining).unwrap();
             return Run {pid, timeslice};
         }
 
         if let Some(process) = self.current_process {
             let pid = process.pid();
+            // self.remaining can't be 0 (a process cannot have 0 remaining timeslice)
             let timeslice = NonZeroUsize::new(self.remaining).unwrap();
             return Run {pid, timeslice};
         }
@@ -223,6 +230,7 @@ impl Scheduler for PriorityQueue {
                         SyscallResult::Pid(process.pid().clone())
                     }
                     Syscall::Sleep(amount) => {
+                        // current_process can't be none (case handled above)
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
@@ -246,11 +254,13 @@ impl Scheduler for PriorityQueue {
 
                         self.remaining = self.timeslice.get();
 
+                        // partial_cmp always returns some value
                         self.ready_queue.make_contiguous().sort_by(|a, b| b.partial_cmp(a).unwrap());
 
                         Success
                     }
                     Syscall::Wait(event) => {
+                        // current_process can't be none (case handled above)
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
@@ -272,11 +282,13 @@ impl Scheduler for PriorityQueue {
 
                         self.remaining = self.timeslice.get();
 
+                        // partial_cmp always returns some value
                         self.ready_queue.make_contiguous().sort_by(|a, b| b.partial_cmp(a).unwrap());
 
                         Success
                     }
                     Syscall::Signal(signal) => {
+                        // current_process can't be none (case handled above)
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
@@ -314,6 +326,7 @@ impl Scheduler for PriorityQueue {
                         Success
                     }
                     Syscall::Exit => {
+                        // current_process can't be none (case handled above)
                         let process = self.current_process.unwrap();
                         if process.pid == 1 && (!self.ready_queue.is_empty() || !self.waiting_queue.is_empty()) {
                             self.panic = true;
@@ -328,6 +341,7 @@ impl Scheduler for PriorityQueue {
 
                         self.remaining = self.timeslice.get();
 
+                        // partial_cmp always returns some value
                         self.ready_queue.make_contiguous().sort_by(|a, b| b.partial_cmp(a).unwrap());
 
                         Success
@@ -335,6 +349,7 @@ impl Scheduler for PriorityQueue {
                 }
             }
             StopReason::Expired => {
+                // current_process can't be none if the process expired
                 let mut process = self.current_process.unwrap();
                 process.state = Ready;
                 process.timings.2 += self.remaining;
@@ -361,6 +376,7 @@ impl Scheduler for PriorityQueue {
                 self.ready_queue.push_back(process.clone());
                 self.current_process = None;
 
+                // partial_cmp always returns some value
                 self.ready_queue.make_contiguous().sort_by(|a, b| b.partial_cmp(a).unwrap());
 
                 Success

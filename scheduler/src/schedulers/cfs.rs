@@ -129,11 +129,13 @@ impl CFS {
 
     fn reschedule_process(&mut self, remaining: usize, process: PCB) {
         if remaining >= self.minimum_remaining_timeslice {
+            // partial_cmp always returns some value
             self.ready_queue.make_contiguous().sort_by(|a, b| a.partial_cmp(b).unwrap());
             self.ready_queue.push_front(process.clone());
             self.remaining = remaining;
         } else {
             self.ready_queue.push_back(process.clone());
+            // partial_cmp always returns some value
             self.ready_queue.make_contiguous().sort_by(|a, b| a.partial_cmp(b).unwrap());
             self.remaining = self.timeslice.get();
         }
@@ -150,6 +152,15 @@ impl CFS {
             self.minimum_vruntime = min;
         }
     }
+
+    fn update_timeslice(&mut self, process_cnt: usize) {
+        if let Some(new_timeslice) = NonZeroUsize::new(self.cpu_time.get() / process_cnt) {
+            self.timeslice = new_timeslice;
+        }
+        else {
+            self.timeslice = self.cpu_time;
+        }
+    }
 }
 
 impl Scheduler for CFS {
@@ -161,6 +172,7 @@ impl Scheduler for CFS {
         self.waiting_queue.sort_by_key(|process| process.sleep);
 
         if self.sleep != 0 {
+            // partial_cmp always returns some value
             self.ready_queue.make_contiguous().sort_by(|a, b| a.partial_cmp(b).unwrap());
 
             let amount = self.sleep;
@@ -190,15 +202,18 @@ impl Scheduler for CFS {
             }
             self.sleep = amount;
 
+            // amount can't be 0, case handled above
             return Sleep(NonZeroUsize::new(amount as usize).unwrap());
         }
 
         if !self.ready_queue.is_empty() {
+            // ready_queue has at least 1 process
             let mut process = self.ready_queue.pop_front().unwrap();
             process.state = Running;
             self.current_process = Some(process.clone());
             let pid = process.pid();
             self.remaining = self.remaining.min(self.timeslice.get());
+            // self.remaining can't be 0 (a process cannot have 0 remaining timeslice)
             let timeslice = NonZeroUsize::new(self.remaining).unwrap();
             
             return Run {pid, timeslice};
@@ -207,6 +222,7 @@ impl Scheduler for CFS {
         if let Some(process) = self.current_process {
             let pid = process.pid();
             self.remaining = self.remaining.min(self.timeslice.get());
+            // self.remaining can't be 0 (a process cannot have 0 remaining timeslice)
             let timeslice = NonZeroUsize::new(self.remaining).unwrap();
             return Run {pid, timeslice};
         }
@@ -248,13 +264,14 @@ impl Scheduler for CFS {
                             process.vruntime = self.minimum_vruntime;
                             self.ready_queue.push_back(process.clone());
 
-                            self.timeslice = NonZeroUsize::new(self.cpu_time.get() / (self.ready_queue.len() + 1)).unwrap();
+                            self.update_timeslice(self.ready_queue.len() + 1);
 
                             self.reschedule_process(self.timeslice.get().min(remaining), current_process);
                         }
                         SyscallResult::Pid(process.pid().clone())
                     }
                     Syscall::Sleep(amount) => {
+                        // current_process can't be none (case handled above)
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
@@ -265,7 +282,7 @@ impl Scheduler for CFS {
                         self.wake();
 
                         if self.ready_queue.len() != 0 {
-                            self.timeslice = NonZeroUsize::new(self.cpu_time.get() / self.ready_queue.len()).unwrap();
+                            self.update_timeslice(self.ready_queue.len());
                         }
 
                         let event = None;
@@ -280,11 +297,13 @@ impl Scheduler for CFS {
 
                         self.remaining = self.timeslice.get();
 
+                        // partial_cmp always returns some value
                         self.ready_queue.make_contiguous().sort_by(|a, b| a.partial_cmp(b).unwrap());
 
                         Success
                     }
                     Syscall::Wait(event) => {
+                        // current_process can't be none (case handled above)
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
@@ -295,7 +314,7 @@ impl Scheduler for CFS {
                         self.wake();
 
                         if self.ready_queue.len() != 0 {
-                            self.timeslice = NonZeroUsize::new(self.cpu_time.get() / self.ready_queue.len()).unwrap();
+                            self.update_timeslice(self.ready_queue.len());
                         }
 
                         process.state = Waiting { event: Some(event) };
@@ -308,11 +327,13 @@ impl Scheduler for CFS {
 
                         self.remaining = self.timeslice.get();
 
+                        // partial_cmp always returns some value
                         self.ready_queue.make_contiguous().sort_by(|a, b| a.partial_cmp(b).unwrap());
 
                         Success
                     }
                     Syscall::Signal(signal) => {
+                        // current_process can't be none (case handled above)
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
@@ -337,7 +358,7 @@ impl Scheduler for CFS {
 
                         self.wake();
 
-                        self.timeslice = NonZeroUsize::new(self.cpu_time.get() / (self.ready_queue.len() + 1)).unwrap();
+                        self.update_timeslice(self.ready_queue.len() + 1);
 
                         process.state = Ready;
                         process.timings.2 += self.remaining - remaining - 1;
@@ -350,6 +371,7 @@ impl Scheduler for CFS {
                         Success
                     }
                     Syscall::Exit => {
+                        // current_process can't be none (case handled above)
                         let process = self.current_process.unwrap();
                         if process.pid == 1 && (!self.ready_queue.is_empty() || !self.waiting_queue.is_empty()) {
                             self.panic = true;
@@ -363,11 +385,12 @@ impl Scheduler for CFS {
                         self.wake();
 
                         if self.ready_queue.len() != 0 {
-                            self.timeslice = NonZeroUsize::new(self.cpu_time.get() / self.ready_queue.len()).unwrap();
+                            self.update_timeslice(self.ready_queue.len());
                         }
 
                         self.remaining = self.timeslice.get();
 
+                        // partial_cmp always returns some value
                         self.ready_queue.make_contiguous().sort_by(|a, b| a.partial_cmp(b).unwrap());
 
                         Success
@@ -375,6 +398,7 @@ impl Scheduler for CFS {
                 }
             }
             StopReason::Expired => {
+                // current_process can't be none if the process expired
                 let mut process = self.current_process.unwrap();
                 process.state = Ready;
                 process.timings.2 += self.remaining;
@@ -395,12 +419,13 @@ impl Scheduler for CFS {
 
                 self.wake();
 
-                self.timeslice = NonZeroUsize::new(self.cpu_time.get() / (self.ready_queue.len() + 1)).unwrap();
+                self.update_timeslice(self.ready_queue.len() + 1);
 
                 self.remaining = self.timeslice.get();
                 self.ready_queue.push_back(process.clone());
                 self.current_process = None;
 
+                // partial_cmp always returns some value
                 self.ready_queue.make_contiguous().sort_by(|a, b| a.partial_cmp(b).unwrap());
 
                 Success

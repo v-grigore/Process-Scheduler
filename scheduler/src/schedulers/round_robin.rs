@@ -156,20 +156,24 @@ impl Scheduler for RoundRobin {
             }
             self.sleep = amount;
 
+            // amount can't be 0, case handled above
             return Sleep(NonZeroUsize::new(amount as usize).unwrap());
         }
 
         if !self.ready_queue.is_empty() {
+            // ready_queue has at least 1 process
             let mut process = self.ready_queue.pop_front().unwrap();
             process.state = Running;
             self.current_process = Some(process.clone());
             let pid = process.pid();
+            // self.remaining can't be 0 (a process cannot have 0 remaining timeslice)
             let timeslice = NonZeroUsize::new(self.remaining).unwrap();
             return Run {pid, timeslice};
         }
 
         if let Some(process) = self.current_process {
             let pid = process.pid();
+            // self.remaining can't be 0 (a process cannot have 0 remaining timeslice)
             let timeslice = NonZeroUsize::new(self.remaining).unwrap();
             return Run {pid, timeslice};
         }
@@ -207,6 +211,7 @@ impl Scheduler for RoundRobin {
                         SyscallResult::Pid(process.pid().clone())
                     }
                     Syscall::Sleep(amount) => {
+                        // current_process can't be none (case handled above)
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
@@ -230,6 +235,7 @@ impl Scheduler for RoundRobin {
                         Success
                     }
                     Syscall::Wait(event) => {
+                        // current_process can't be none (case handled above)
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
@@ -251,6 +257,7 @@ impl Scheduler for RoundRobin {
                         Success
                     }
                     Syscall::Signal(signal) => {
+                        // current_process can't be none (case handled above)
                         let mut process = self.current_process.unwrap();
                         self.current_process = None;
 
@@ -285,6 +292,7 @@ impl Scheduler for RoundRobin {
                         Success
                     }
                     Syscall::Exit => {
+                        // current_process can't be none (case handled above)
                         let process = self.current_process.unwrap();
                         if process.pid == 1 && (!self.ready_queue.is_empty() || !self.waiting_queue.is_empty()) {
                             self.panic = true;
@@ -304,6 +312,7 @@ impl Scheduler for RoundRobin {
                 }
             }
             StopReason::Expired => {
+                // current_process can't be none if the process expired
                 let mut process = self.current_process.unwrap();
                 process.state = Ready;
                 process.timings.2 += self.remaining;

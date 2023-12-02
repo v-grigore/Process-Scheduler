@@ -8,17 +8,12 @@ use std::num::NonZeroUsize;
 
 mod scheduler;
 
-use schedulers::Empty;
-
 pub use crate::scheduler::{
     Pid, Process, ProcessState, Scheduler, SchedulingDecision, StopReason, Syscall, SyscallResult,
 };
+
 use crate::schedulers::{CFS, PriorityQueue, RoundRobin};
-
 mod schedulers;
-
-// TODO import your scheduler here
-// This example imports the Empty scheduler
 
 /// Returns a structure that implements the `Scheduler` trait with a round robin scheduler policy
 ///
